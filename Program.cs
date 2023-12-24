@@ -99,6 +99,7 @@ namespace IngameScript
             {
                 // Receiver
                 _receiver.Receive();
+
             }
 
             // Update ship state
@@ -109,12 +110,14 @@ namespace IngameScript
                 mass = (double)mainController.CalculateShipMass().TotalMass;
                 mainController.TryGetPlanetElevation(MyPlanetElevation.Surface, out altitude);
 
+                StringBuilder sb = new StringBuilder();
+                sb.AppendLine("Gravity: " + gravity.ToString());
+                sb.AppendLine("Mass: " + mass.ToString());
+                sb.AppendLine("Total thrusters: " + thrusters.Count().ToString());
+                sb.AppendLine("Total gyros: " + gyros.Count().ToString());
+                sb.AppendLine("Time:" + DateTime.Now);
 
-                Print("Gravity: " + gravity.ToString() +
-                    "\nMass: " + mass.ToString() +
-                    "\nTotal thrusters: " + thrusters.Count().ToString() +
-                    "\nTotal gyros: " + gyros.Count().ToString() +
-                    "\nAltitude: " + altitude.ToString());
+                _transmitter.Transmit(sb.ToString());
             }
         }
 
