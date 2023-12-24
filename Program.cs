@@ -3,15 +3,12 @@ using Sandbox.ModAPI.Ingame;
 using Sandbox.ModAPI.Interfaces;
 using SpaceEngineers.Game.ModAPI.Ingame;
 using System;
-using System.CodeDom;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Text;
 using VRage;
-using VRage.Audio;
 using VRage.Collections;
 using VRage.Game;
 using VRage.Game.Components;
@@ -25,6 +22,23 @@ namespace IngameScript
 {
     partial class Program : MyGridProgram
     {
+        // Script state
+        enum State
+        {
+            IDLE,
+            APPROACHING,
+            LANDING,
+            LANDED
+        }
+
+        // Transmitter and Receiver classes and variables
+        Transmitter _transmitter = null;
+        Receiver _receiver = null;
+        bool IsReceiver = false;
+
+        // Parse arguments 
+        MyCommandLine _commandLine = new MyCommandLine();
+
         List<IMyShipController> controllers = new List<IMyShipController>();
         List<IMyGasTank> tanks = new List<IMyGasTank>();
 
@@ -41,28 +55,24 @@ namespace IngameScript
 
         double gravity = 0.0;
         double mass = 0.0;
-        double altitude = 0.0;
 
         public Program()
         {
-            // The constructor, called only once every session and
-            // always before any other method is called. Use it to
-            // initialize your script. 
-            //     
-            // The constructor is optional and can be removed if not
-            // needed.
-            // 
-            // It's recommended to set Runtime.UpdateFrequency 
-            // here, which will allow your script to run itself without a 
-            // timer block.
-            Runtime.UpdateFrequency = UpdateFrequency.Update1;
+            //allow transmitter class to access grid
+            Runtime.UpdateFrequency = UpdateFrequency.Update100;
+
+            // Transmitter class
+            _transmitter = new Transmitter(this);
+
+            // Receiver class
+            _receiver = new Receiver(this);
 
             // Get main controller
             GridTerminalSystem.GetBlocksOfType(controllers);
             mainController = controllers.Find(x => x.CanControlShip);
             mainController.Orientation.GetMatrix(out mainControllerMatrix);
 
-            // Get gyros 
+            // Get gyros
             GridTerminalSystem.GetBlocksOfType(gyros);
 
             // Get thrusters
@@ -73,37 +83,56 @@ namespace IngameScript
         {
             // Called when the program needs to save its state. Use
             // this method to save your state to the Storage field
-            // or some other means. 
-            // 
+            // or some other means.
+            //
             // This method is optional and can be removed if not
             // needed.
         }
 
         public void Main(string argument, UpdateType updateSource)
         {
-            // The main entry point of the script, invoked every time
-            // one of the programmable block's Run actions are invoked,
-            // or the script updates itself. The updateSource argument
-            // describes where the update came from. Be aware that the
-            // updateSource is a  bitfield  and might contain more than 
-            // one update type.
-            // 
-            // The method itself is required, but the arguments above
-            // can be removed if not needed.
+            // Parse arguments and set flags accordingly
+            ParseArguments(argument);
+
+            if (IsReceiver)
+            {
+                // Receiver
+                _receiver.Receive();
+            }
 
             // TODO: Everything in try-catch block
-            if (mainController != null)
+            if (mainController != null && !IsReceiver)
             {
                 // Get gravity and mass
                 gravity = (double)mainController.GetNaturalGravity().Length();
                 mass = (double)mainController.CalculateShipMass().TotalMass;
-                altitude = (double)mainController.
+
+                // current time in milliseconds
+                long currentTime = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
+                _transmitter.Transmit(currentTime.ToString());
 
                 Print("Gravity: " + gravity.ToString() +
                     "\nMass: " + mass.ToString() +
                     "\nTotal thrusters: " + thrusters.Count().ToString() +
                     "\nTotal gyros: " + gyros.Count().ToString());
+            }
+        }
 
+        private void ParseArguments(string argument)
+        {
+            if (_commandLine.TryParse(argument))
+            {
+                if (_commandLine.ArgumentCount > 0)
+                {
+                    switch (_commandLine.Argument(0))
+                    {
+                        case "receiver":
+                            IsReceiver = true;
+                            break;
+                        default:
+                            break;
+                    }
+                }
             }
         }
 
