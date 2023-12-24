@@ -133,3 +133,4 @@ $RECYCLE.BIN/
 _NCrunch*
 
 .vs
+MDK/MDK.paths.props
