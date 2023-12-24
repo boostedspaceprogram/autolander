@@ -55,11 +55,12 @@ namespace IngameScript
 
         double gravity = 0.0;
         double mass = 0.0;
+        double altitude = 0.0;
 
         public Program()
         {
             //allow transmitter class to access grid
-            Runtime.UpdateFrequency = UpdateFrequency.Update100;
+            Runtime.UpdateFrequency = UpdateFrequency.Update1;
 
             // Transmitter class
             _transmitter = new Transmitter(this);
@@ -76,7 +77,7 @@ namespace IngameScript
             GridTerminalSystem.GetBlocksOfType(gyros);
 
             // Get thrusters
-            updateThrusters();
+            setThrusters();
         }
 
         public void Save()
@@ -100,21 +101,20 @@ namespace IngameScript
                 _receiver.Receive();
             }
 
-            // TODO: Everything in try-catch block
+            // Update ship state
             if (mainController != null && !IsReceiver)
             {
-                // Get gravity and mass
+                // Get gravity, mass, altitude
                 gravity = (double)mainController.GetNaturalGravity().Length();
                 mass = (double)mainController.CalculateShipMass().TotalMass;
+                mainController.TryGetPlanetElevation(MyPlanetElevation.Surface, out altitude);
 
-                // current time in milliseconds
-                long currentTime = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
-                _transmitter.Transmit(currentTime.ToString());
 
                 Print("Gravity: " + gravity.ToString() +
                     "\nMass: " + mass.ToString() +
                     "\nTotal thrusters: " + thrusters.Count().ToString() +
-                    "\nTotal gyros: " + gyros.Count().ToString());
+                    "\nTotal gyros: " + gyros.Count().ToString() +
+                    "\nAltitude: " + altitude.ToString());
             }
         }
 
@@ -136,7 +136,7 @@ namespace IngameScript
             }
         }
 
-        private void updateThrusters()
+        private void setThrusters()
         {
             GridTerminalSystem.GetBlocksOfType(thrusters);
 
