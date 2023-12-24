@@ -59,7 +59,7 @@ namespace IngameScript
         public Program()
         {
             //allow transmitter class to access grid
-            Runtime.UpdateFrequency = UpdateFrequency.Update100;
+            Runtime.UpdateFrequency = UpdateFrequency.Update1;
 
             // Transmitter class
             _transmitter = new Transmitter(this);
@@ -98,6 +98,7 @@ namespace IngameScript
             {
                 // Receiver
                 _receiver.Receive();
+
             }
 
             // TODO: Everything in try-catch block
@@ -107,14 +108,19 @@ namespace IngameScript
                 gravity = (double)mainController.GetNaturalGravity().Length();
                 mass = (double)mainController.CalculateShipMass().TotalMass;
 
-                // current time in milliseconds
-                long currentTime = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
-                _transmitter.Transmit(currentTime.ToString());
-
                 Print("Gravity: " + gravity.ToString() +
                     "\nMass: " + mass.ToString() +
                     "\nTotal thrusters: " + thrusters.Count().ToString() +
                     "\nTotal gyros: " + gyros.Count().ToString());
+
+                StringBuilder sb = new StringBuilder();
+                sb.AppendLine("Gravity: " + gravity.ToString());
+                sb.AppendLine("Mass: " + mass.ToString());
+                sb.AppendLine("Total thrusters: " + thrusters.Count().ToString());
+                sb.AppendLine("Total gyros: " + gyros.Count().ToString());
+                sb.AppendLine("Time:" + DateTime.Now);
+
+                _transmitter.Transmit(sb.ToString());
             }
         }
 

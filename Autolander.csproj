@@ -4,7 +4,7 @@
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <ProjectGuid>{D91627BD-4E7E-46FE-96C5-4CE37B89EF28}</ProjectGuid>
+    <ProjectGuid>{627B7220-21FB-4783-AAC1-CFD2A53FAB26}</ProjectGuid>
     <OutputType>Exe</OutputType>
     <RootNamespace>IngameScript</RootNamespace>
     <AssemblyName>Autolander</AssemblyName>

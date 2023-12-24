@@ -58,8 +58,6 @@ namespace IngameScript
 
                 // Transmit message
                 _program.IGC.SendBroadcastMessage(RECEIVER_TAG, message);
-                _program.Echo(message);
-                _program.Print(message);
             }
         }
     }
