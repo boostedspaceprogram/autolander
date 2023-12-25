@@ -39,7 +39,13 @@ namespace IngameScript
         // Parse arguments 
         MyCommandLine _commandLine = new MyCommandLine();
 
+        // Antennas
+        List<IMyRadioAntenna> antennas = new List<IMyRadioAntenna>();
+
+        // Controllers
         List<IMyShipController> controllers = new List<IMyShipController>();
+
+        // Gas tanks
         List<IMyGasTank> tanks = new List<IMyGasTank>();
 
         // Thrusters
@@ -61,15 +67,35 @@ namespace IngameScript
             //allow transmitter class to access grid
             Runtime.UpdateFrequency = UpdateFrequency.Update1;
 
-            // Transmitter class
-            _transmitter = new Transmitter(this);
-
-            // Receiver class
-            _receiver = new Receiver(this);
-
             // Get main controller
             GridTerminalSystem.GetBlocksOfType(controllers);
+            if (controllers.Count() == 0)
+            {
+                throw new Exception("No ship controller found");
+            }
+
+            // Get main controller (the one that can control the ship)
             mainController = controllers.Find(x => x.CanControlShip);
+            if (mainController == null)
+            {
+                throw new Exception("No main controller found");
+            }
+
+            // Get antennas
+            GridTerminalSystem.GetBlocksOfType(antennas);
+            if (antennas.Count >= 1)
+            {
+                // Transmitter class
+                _transmitter = new Transmitter(this);
+
+                // Receiver class
+                _receiver = new Receiver(this);
+            } else
+            {
+                throw new Exception("No antennas found");
+            }
+
+            // Save orientation of controller
             mainController.Orientation.GetMatrix(out mainControllerMatrix);
 
             // Get gyros
