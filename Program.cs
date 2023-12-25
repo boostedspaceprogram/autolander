@@ -23,13 +23,9 @@ namespace IngameScript
     partial class Program : MyGridProgram
     {
         // Script state
-        enum State
-        {
-            IDLE,
-            APPROACHING,
-            LANDING,
-            LANDED
-        }
+        bool IsTransmitting = false;
+        bool IsReceiver = false;
+        bool IsLanding = false;
 
         // Transmitter and Receiver classes and variables
         Transmitter _transmitter = null;
@@ -55,6 +51,9 @@ namespace IngameScript
 
         double gravity = 0.0;
         double mass = 0.0;
+
+        // Counter of frame ticks
+        int counter = 0;
 
         public Program()
         {
@@ -91,6 +90,7 @@ namespace IngameScript
 
         public void Main(string argument, UpdateType updateSource)
         {
+            counter++;
             // Parse arguments and set flags accordingly
             ParseArguments(argument);
 
@@ -98,6 +98,41 @@ namespace IngameScript
             {
                 // Receiver
                 _receiver.Receive();
+            }
+
+            if (IsTransmitting)
+            {
+                // String Builder for all data to be transmitted, csv format (time, gravity)
+                StringBuilder sb = new StringBuilder();
+
+                // Counter
+                sb.Append(counter.ToString());
+                sb.Append("\n");
+
+                // Gravity in m/s^2
+                sb.Append(mainController.GetNaturalGravity().Length());
+                sb.Append("\n");
+
+                // Mass in kg
+                sb.Append(mainController.CalculateShipMass().TotalMass);
+                sb.Append("\n");
+
+                // Altitude in m
+                double altitude = 0.0;
+                mainController.TryGetPlanetElevation(MyPlanetElevation.Surface, out altitude);
+                sb.Append(altitude);
+                sb.Append("\n");
+
+                // Velocity in m/s
+                sb.Append(mainController.GetShipVelocities().LinearVelocity.Length());
+                sb.Append("\n");
+
+                // Max thrust in N
+                sb.Append(thrustersUp.Sum(thruster => thruster.MaxEffectiveThrust));
+                sb.Append("\n");
+
+                // Transmitter
+                _transmitter.Transmit(sb.ToString());
             }
 
             // TODO: Everything in try-catch block
@@ -122,8 +157,12 @@ namespace IngameScript
         {
             if (_commandLine.TryParse(argument))
             {
-                if (_commandLine.ArgumentCount > 0)
+                if (_commandLine.ArgumentCount > 0 || _commandLine.Switches.Count() > 0)
                 {
+                    // Check if (-transmitter) switch is present to enable transmitter
+                    IsTransmitting = _commandLine.Switch("transmitter");
+
+                    // Parse script arguments (if any)
                     switch (_commandLine.Argument(0))
                     {
                         case "receiver":
@@ -170,9 +209,87 @@ namespace IngameScript
         {
             IMyTextSurface mesurface0 = Me.GetSurface(0);
             mesurface0.ContentType = ContentType.TEXT_AND_IMAGE;
-            mesurface0.FontSize = 2;
-            mesurface0.Alignment = VRage.Game.GUI.TextPanel.TextAlignment.CENTER;
             mesurface0.WriteText(message);
         }
+
+        private void LandShip()
+        {
+            // Get gravity, mass, altitude, velocity, and maximum thrust
+            gravity = (double)mainController.GetNaturalGravity().Length();
+            mass = (double)mainController.CalculateShipMass().TotalMass;
+            mainController.TryGetPlanetElevation(MyPlanetElevation.Surface, out altitude);
+            velocity = (double)mainController.GetShipVelocities().LinearVelocity.Length();
+            maxThrust = thrustersUp.Sum(thruster => thruster.MaxEffectiveThrust);
+
+            // Subtract the sensor offset from the altitude
+            double sensorOffset = 4.0; // Altitude sensor offset in meters
+            altitude -= sensorOffset;
+
+            // Calculate the force of gravity
+            double gravitationalForce = mass * gravity;
+
+            // Calculate the maximum possible deceleration (thrust - gravitational force)
+            double maxDeceleration = (maxThrust - gravitationalForce) / mass;
+
+            // Calculate the distance needed to stop from the current velocity and deceleration
+            double stoppingDistance = Math.Pow(velocity, 2) / (2 * maxDeceleration);
+
+            // Add a safety margin to the stopping distance to account for delays in thrust application
+            double safetyMargin = 0.7; // 0% safety margin
+            double adjustedStoppingDistance = stoppingDistance * safetyMargin;
+
+            Echo("Gravitanional force: " + gravitationalForce.ToString());
+            Echo("maxDeceleration: " + maxDeceleration.ToString());
+            Echo("stoppingDistance: " + stoppingDistance.ToString());
+            Echo("adjustedStoppingDistance: " + adjustedStoppingDistance.ToString());
+            Echo("altitude: " + altitude.ToString());
+            Echo("velocity: " + velocity.ToString());
+            Echo("maxThrust: " + maxThrust.ToString());
+
+            // Start deceleration burn at the adjusted stopping distance
+            if (altitude <= adjustedStoppingDistance && altitude >= 50)
+            {
+                Echo("MAX THRUST");
+                // Set the thrust to the maximum available to initiate deceleration
+                SetThrust(maxThrust);
+            } else
+            {
+                // If the rocket is not within the adjusted stopping distance, cut the thrust
+                SetThrust(0);
+            }
+
+            // Once the rocket is close to the surface and the velocity is low, increase the thrust for a soft landing
+            if (altitude >= 5 && altitude <= 50)
+            {
+                // Calculate the thrust needed to slow down descent gently
+                // Increase the multiplier as needed to provide more thrust
+                double descentControlFactor = 0.4; // Increase this factor to apply more thrust during soft landing
+                double landingThrust = gravitationalForce + (mass * velocity * descentControlFactor);
+
+                // Ensure the landing thrust does not exceed maximum thrust capacity
+                landingThrust = Math.Min(landingThrust, maxThrust);
+
+                SetThrust(landingThrust);
+                Echo("landingThrust: " + landingThrust.ToString());
+            }
+
+            // If the velocity is close to zero and the rocket is very close to the surface, cut the thrust to land
+            if (velocity < 2 && thrustersOn)
+            {
+                IsLanding = false;
+                sas.TryRun("off");
+                SetThrust(0);
+                Echo("LANDED");
+            }
+        }
+
+        private void SetThrust(double thrust)
+        {
+            double thrustPercentage = thrust / maxThrust;
+            thrustersUp.ForEach(thruster => thruster.ThrustOverridePercentage = (float)thrustPercentage);
+            thrustersOn = thrust > 0;
+        }
+
+
     }
 }
