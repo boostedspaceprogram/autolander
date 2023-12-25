@@ -23,22 +23,15 @@ namespace IngameScript
     partial class Program : MyGridProgram
     {
         // Script state
-        enum State
-        {
-            IDLE,
-            APPROACHING,
-            LANDING,
-            LANDED
-        }
+        bool IsReceiver = false;
+        bool IsLanding = false;
 
         // Transmitter and Receiver classes and variables
         Transmitter _transmitter = null;
         Receiver _receiver = null;
-        bool IsReceiver = false;
 
         // Parse arguments 
         MyCommandLine _commandLine = new MyCommandLine();
-
         List<IMyShipController> controllers = new List<IMyShipController>();
         List<IMyGasTank> tanks = new List<IMyGasTank>();
 
@@ -52,10 +45,13 @@ namespace IngameScript
         IMyShipController mainController = null;
         Matrix mainControllerMatrix;
         List<IMyGyro> gyros = new List<IMyGyro>();
+        IMyProgrammableBlock sas = null;
 
         double gravity = 0.0;
         double mass = 0.0;
         double altitude = 0.0;
+        double velocity = 0.0;
+        double maxThrust = 0.0;
 
         public Program()
         {
@@ -70,14 +66,36 @@ namespace IngameScript
 
             // Get main controller
             GridTerminalSystem.GetBlocksOfType(controllers);
+            if (controllers.Count() == 0)
+            {
+                throw new Exception("No ship controller found");
+            }
+
             mainController = controllers.Find(x => x.CanControlShip);
+            if (mainController == null)
+            {
+                throw new Exception("No main controller found");
+            }
+
+            // Save orientation of controller
             mainController.Orientation.GetMatrix(out mainControllerMatrix);
 
             // Get gyros
             GridTerminalSystem.GetBlocksOfType(gyros);
+            if (gyros.Count() == 0)
+            {
+                throw new Exception("No gyros found");
+            }
 
             // Get thrusters
             setThrusters();
+
+            // Get SAS
+            sas = GridTerminalSystem.GetBlockWithName("SAS") as IMyProgrammableBlock;
+            if (sas == null)
+            {
+                throw new Exception("No SAS found");
+            }
         }
 
         public void Save()
@@ -102,22 +120,9 @@ namespace IngameScript
 
             }
 
-            // Update ship state
-            if (mainController != null && !IsReceiver)
+            if (IsLanding)
             {
-                // Get gravity, mass, altitude
-                gravity = (double)mainController.GetNaturalGravity().Length();
-                mass = (double)mainController.CalculateShipMass().TotalMass;
-                mainController.TryGetPlanetElevation(MyPlanetElevation.Surface, out altitude);
-
-                StringBuilder sb = new StringBuilder();
-                sb.AppendLine("Gravity: " + gravity.ToString());
-                sb.AppendLine("Mass: " + mass.ToString());
-                sb.AppendLine("Total thrusters: " + thrusters.Count().ToString());
-                sb.AppendLine("Total gyros: " + gyros.Count().ToString());
-                sb.AppendLine("Time:" + DateTime.Now);
-
-                _transmitter.Transmit(sb.ToString());
+                LandShip();
             }
         }
 
@@ -132,6 +137,9 @@ namespace IngameScript
                         case "receiver":
                             IsReceiver = true;
                             break;
+                        case "land":
+                            IsLanding = true;
+                            break;
                         default:
                             break;
                     }
@@ -142,6 +150,10 @@ namespace IngameScript
         private void setThrusters()
         {
             GridTerminalSystem.GetBlocksOfType(thrusters);
+            if (thrusters.Count() == 0)
+            {
+                throw new Exception("No thrusters found");
+            }
 
             thrusters.ForEach(thruster =>
             {
@@ -177,5 +189,35 @@ namespace IngameScript
             mesurface0.Alignment = VRage.Game.GUI.TextPanel.TextAlignment.CENTER;
             mesurface0.WriteText(message);
         }
+
+        private void LandShip()
+        {
+            sas.TryRun("retro");
+
+            // Get gravity, mass, altitude
+            gravity = (double)mainController.GetNaturalGravity().Length();
+            mass = (double)mainController.CalculateShipMass().TotalMass;
+            mainController.TryGetPlanetElevation(MyPlanetElevation.Surface, out altitude);
+            velocity = (double)mainController.GetShipVelocities().LinearVelocity.Length();
+            maxThrust = thrustersUp.Sum(thruster => thruster.MaxEffectiveThrust);
+
+
+            double gravitationalForce = mass * gravity;
+            double maxDeceleration = (maxThrust - gravitationalForce) / mass;
+            double stoppingDistance = (velocity * velocity) / (2 * maxDeceleration);
+
+            Echo("StoppingDistance: " + stoppingDistance.ToString());
+            Echo("Altitude: " + altitude.ToString());
+
+            if (stoppingDistance >= altitude) 
+            {
+                SetThrust(maxThrust);
+            } 
+        }
+
+        private void SetThrust(double thrust)
+        {
+            thrustersUp.ForEach(thruster => thruster.ThrustOverridePercentage = (float)thrust);
+        }   
     }
 }
