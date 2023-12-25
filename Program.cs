@@ -52,6 +52,7 @@ namespace IngameScript
         double altitude = 0.0;
         double velocity = 0.0;
         double maxThrust = 0.0;
+        bool thrustersOn = false;
 
         public Program()
         {
@@ -139,6 +140,7 @@ namespace IngameScript
                             break;
                         case "land":
                             IsLanding = true;
+                            sas.TryRun("retro");
                             break;
                         default:
                             break;
@@ -192,8 +194,6 @@ namespace IngameScript
 
         private void LandShip()
         {
-            sas.TryRun("retro");
-
             // Get gravity, mass, altitude
             gravity = (double)mainController.GetNaturalGravity().Length();
             mass = (double)mainController.CalculateShipMass().TotalMass;
@@ -201,23 +201,35 @@ namespace IngameScript
             velocity = (double)mainController.GetShipVelocities().LinearVelocity.Length();
             maxThrust = thrustersUp.Sum(thruster => thruster.MaxEffectiveThrust);
 
-
             double gravitationalForce = mass * gravity;
             double maxDeceleration = (maxThrust - gravitationalForce) / mass;
             double stoppingDistance = (velocity * velocity) / (2 * maxDeceleration);
+            double adjustedStoppingDistance = stoppingDistance * 0.85;
 
             Echo("StoppingDistance: " + stoppingDistance.ToString());
+            Echo("AdjustedStoppingDistance: " + adjustedStoppingDistance.ToString());
             Echo("Altitude: " + altitude.ToString());
+            Echo("Velocity: " + velocity.ToString());
 
-            if (stoppingDistance >= altitude) 
+            if (altitude <= stoppingDistance)
             {
-                SetThrust(maxThrust);
+                double thrustRatio = Math.Pow(altitude / adjustedStoppingDistance, 0.5);
+                double adjustedThrust = maxThrust * thrustRatio;
+                SetThrust(adjustedThrust);
             } 
+
+            if (thrustersOn && velocity < 5)
+            {
+                IsLanding = false;
+                sas.TryRun("off");
+                SetThrust(0);
+            }
         }
 
         private void SetThrust(double thrust)
         {
             thrustersUp.ForEach(thruster => thruster.ThrustOverridePercentage = (float)thrust);
-        }   
+            thrustersOn = true;
+        }
     }
 }
