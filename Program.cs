@@ -81,18 +81,18 @@ namespace IngameScript
                 throw new Exception("No main controller found");
             }
 
-            // Get antennas
+            // Get antennas (for transmitter and receiver)
             GridTerminalSystem.GetBlocksOfType(antennas);
-            if (antennas.Count >= 1)
+            if (antennas.Count() == 0)
+            {
+                throw new Exception("No antennas found");
+            } else
             {
                 // Transmitter class
                 _transmitter = new Transmitter(this);
 
                 // Receiver class
                 _receiver = new Receiver(this);
-            } else
-            {
-                throw new Exception("No antennas found");
             }
 
             // Save orientation of controller
