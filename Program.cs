@@ -30,12 +30,17 @@ namespace IngameScript
         // Transmitter and Receiver classes and variables
         Transmitter _transmitter = null;
         Receiver _receiver = null;
-        bool IsReceiver = false;
 
-        // Parse arguments 
+        // Parse arguments
         MyCommandLine _commandLine = new MyCommandLine();
 
+        // Antennas
+        List<IMyRadioAntenna> antennas = new List<IMyRadioAntenna>();
+
+        // Controllers
         List<IMyShipController> controllers = new List<IMyShipController>();
+
+        // Gas tanks
         List<IMyGasTank> tanks = new List<IMyGasTank>();
 
         // Thrusters
@@ -48,34 +53,70 @@ namespace IngameScript
         IMyShipController mainController = null;
         Matrix mainControllerMatrix;
         List<IMyGyro> gyros = new List<IMyGyro>();
+        IMyProgrammableBlock sas = null;
 
         double gravity = 0.0;
         double mass = 0.0;
+        double altitude = 0.0;
+        double velocity = 0.0;
+        double maxThrust = 0.0;
+        bool thrustersOn = false;
 
-        // Counter of frame ticks
         int counter = 0;
 
         public Program()
         {
             //allow transmitter class to access grid
-            Runtime.UpdateFrequency = UpdateFrequency.Update100;
-
-            // Transmitter class
-            _transmitter = new Transmitter(this);
-
-            // Receiver class
-            _receiver = new Receiver(this);
+            Runtime.UpdateFrequency = UpdateFrequency.Update1;
 
             // Get main controller
             GridTerminalSystem.GetBlocksOfType(controllers);
+            if (controllers.Count() == 0)
+            {
+                throw new Exception("No ship controller found");
+            }
+
+            // Get main controller (the one that can control the ship)
             mainController = controllers.Find(x => x.CanControlShip);
+            if (mainController == null)
+            {
+                throw new Exception("No main controller found");
+            }
+
+            // Get antennas (for transmitter and receiver)
+            GridTerminalSystem.GetBlocksOfType(antennas);
+            if (antennas.Count() == 0)
+            {
+                throw new Exception("No antennas found");
+            }
+            else
+            {
+                // Transmitter class
+                _transmitter = new Transmitter(this);
+
+                // Receiver class
+                _receiver = new Receiver(this);
+            }
+
+            // Save orientation of controller
             mainController.Orientation.GetMatrix(out mainControllerMatrix);
 
             // Get gyros
             GridTerminalSystem.GetBlocksOfType(gyros);
+            if (gyros.Count() == 0)
+            {
+                throw new Exception("No gyros found");
+            }
 
             // Get thrusters
-            updateThrusters();
+            setThrusters();
+
+            // Get SAS
+            sas = GridTerminalSystem.GetBlockWithName("SAS") as IMyProgrammableBlock;
+            if (sas == null)
+            {
+                throw new Exception("No SAS found");
+            }
         }
 
         public void Save()
@@ -135,21 +176,9 @@ namespace IngameScript
                 _transmitter.Transmit(sb.ToString());
             }
 
-            // TODO: Everything in try-catch block
-            if (mainController != null && !IsReceiver)
+            if (IsLanding)
             {
-                // Get gravity and mass
-                gravity = (double)mainController.GetNaturalGravity().Length();
-                mass = (double)mainController.CalculateShipMass().TotalMass;
-
-                // current time in milliseconds
-                long currentTime = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
-                _transmitter.Transmit(currentTime.ToString());
-
-                Print("Gravity: " + gravity.ToString() +
-                    "\nMass: " + mass.ToString() +
-                    "\nTotal thrusters: " + thrusters.Count().ToString() +
-                    "\nTotal gyros: " + gyros.Count().ToString());
+                LandShip();
             }
         }
 
@@ -168,6 +197,10 @@ namespace IngameScript
                         case "receiver":
                             IsReceiver = true;
                             break;
+                        case "land":
+                            IsLanding = true;
+                            sas.TryRun("retro");
+                            break;
                         default:
                             break;
                     }
@@ -175,9 +208,13 @@ namespace IngameScript
             }
         }
 
-        private void updateThrusters()
+        private void setThrusters()
         {
             GridTerminalSystem.GetBlocksOfType(thrusters);
+            if (thrusters.Count() == 0)
+            {
+                throw new Exception("No thrusters found");
+            }
 
             thrusters.ForEach(thruster =>
             {
@@ -285,9 +322,8 @@ namespace IngameScript
 
         private void SetThrust(double thrust)
         {
-            double thrustPercentage = thrust / maxThrust;
-            thrustersUp.ForEach(thruster => thruster.ThrustOverridePercentage = (float)thrustPercentage);
-            thrustersOn = thrust > 0;
+            thrustersUp.ForEach(thruster => thruster.ThrustOverridePercentage = (float)thrust);
+            thrustersOn = true;
         }
 
 
