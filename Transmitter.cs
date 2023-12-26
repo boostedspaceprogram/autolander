@@ -26,18 +26,7 @@ namespace IngameScript
     partial class Program
     {
         public class Transmitter
-        {
-            //[----------------------------------]
-            //[----- BEGIN CUSTOMIZABLE CODE -----]
-            //[----------------------------------]
-
-            const bool TRANSMIT = true; // Set to false to disable transmission
-            const string RECEIVER_TAG = "Autolander"; // Receiver tag (must match transmitter's TRANSMITTER_TAG)
-
-            //[--------------------------------]
-            //[----- END CUSTOMIZABLE CODE -----]
-            //[--------------------------------]
-
+        { 
             // Program reference (for access to GridTerminalSystem, Echo, etc.)
             Program _program;
 
@@ -45,7 +34,6 @@ namespace IngameScript
             {
                 // Set program reference
                 _program = program;
-                _program.Echo("[BSP-Autolander]: Transmitter initialized (" + RECEIVER_TAG + ")");
             }
 
             // <summary>
@@ -54,12 +42,10 @@ namespace IngameScript
             // </summary>
             public void Transmit(string message)
             {
-                if (!TRANSMIT) return; // Abort if transmission is disabled
+                if (!_program.IsTransmitting) return; // Abort if transmission is disabled
 
                 // Transmit message
-                _program.IGC.SendBroadcastMessage(RECEIVER_TAG, message);
-                _program.Echo(message);
-                _program.Print(message);
+                _program.IGC.SendBroadcastMessage(_program.TRANSMIT_RECEIVER_TAG, message);
             }
         }
     }
