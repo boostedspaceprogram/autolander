@@ -2,8 +2,10 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using VRage.Game.ModAPI.Ingame.Utilities;
+using VRage.Input;
 using VRageMath;
 using VRageRender;
 
@@ -11,6 +13,8 @@ namespace IngameScript
 {
     partial class Program : MyGridProgram
     {
+        private const int INVENTORY_MULTIPLIER = 10;
+
         enum ScriptState
         {
             STARTED,
@@ -66,6 +70,8 @@ namespace IngameScript
         double altitude = 0.0;
         double velocity = 0.0;
         double maxThrust = 0.0;
+        double brakeDistance = 0.0;
+        double burnTime = 0.0;
         bool thrustersOn = false;
 
         int counter = 0;
@@ -75,33 +81,28 @@ namespace IngameScript
             //allow transmitter class to access grid
             Runtime.UpdateFrequency = UpdateFrequency.Update1;
 
+            // Check custom data for transmitter and receiver
+            CheckCustomData();
+
+            // Get antennas (for transmitter and receiver)
+            GridTerminalSystem.GetBlocksOfType(antennas);
+            if (antennas.Count() == 0 && (IsTransmitting || IsReceiver))
+            {
+                throw new Exception("No antennas found");
+            }
+
             // Get main controller
             GridTerminalSystem.GetBlocksOfType(controllers);
-            if (controllers.Count() == 0)
+            if (controllers.Count() == 0 && !IsReceiver)
             {
                 throw new Exception("No controllers found");
             }
 
             // Get main controller (the one that can control the ship)
             mainController = controllers.Find(x => x.CanControlShip);
-            if (mainController == null)
+            if (mainController == null && !IsReceiver)
             {
                 throw new Exception("No main controller found");
-            }
-
-            // Get antennas (for transmitter and receiver)
-            GridTerminalSystem.GetBlocksOfType(antennas);
-            if (antennas.Count() == 0)
-            {
-                throw new Exception("No antennas found");
-            }
-            else
-            {
-                // Transmitter class
-                _transmitter = new Transmitter(this);
-
-                // Receiver class
-                _receiver = new Receiver(this);
             }
 
             // Save orientation of controller
@@ -109,20 +110,52 @@ namespace IngameScript
 
             // Get gyros
             GridTerminalSystem.GetBlocksOfType(gyros);
-            if (gyros.Count() == 0)
+            if (gyros.Count() == 0 && !IsReceiver)
             {
                 throw new Exception("No gyros found");
             }
 
             // Get SAS
             sas = GridTerminalSystem.GetBlockWithName("SAS") as IMyProgrammableBlock;
-            if (sas == null)
+            if (sas == null && !IsReceiver)
             {
                 throw new Exception("No SAS found");
             }
 
             // Asign thrusters to correct orientation
             AsignThrusters();
+        }
+
+        private void CheckCustomData()
+        {
+            // Get customdata for TX and RX
+            string customData = Me.CustomData;
+
+            // Parse every line of customdata
+            string[] customDataLines = customData.Split('\n');
+
+            // Loop trough all lines
+            foreach (string customDataLine in customDataLines)
+            {
+                // Parse every line on empty spaces
+                string[] customDataLineArguments = customDataLine.Split(' ');
+
+                // Check if line contains arguments
+                if (customDataLineArguments.Length > 0)
+                {
+                    switch (customDataLineArguments[0].ToLower())
+                    {
+                        case "transmitter":
+                            _transmitter = new Transmitter(this);
+                            break;
+                        case "receiver":
+                            _receiver = new Receiver(this);
+                            break;
+                        default:
+                            break;
+                    }
+                }
+            }
         }
 
         public void Main(string argument, UpdateType updateSource)
@@ -150,21 +183,23 @@ namespace IngameScript
         {
             if (_commandLine.TryParse(argument))
             {
-                if (_commandLine.ArgumentCount > 0 || _commandLine.Switches.Count() > 0)
+                if (_commandLine.ArgumentCount > 0)
                 {
-                    // Check if (-transmitter) switch is present to enable transmitter
-                    IsTransmitting = _commandLine.Switch("transmitter");
+                    // Parse commandLine arguments on empty spaces
+                    string[] ParsedArguments = argument.Split(' ');
 
-                    // Parse script arguments (if any)
-                    switch (_commandLine.Argument(0))
+                    // loop trough all arguments and set flags accordingly
+                    foreach (string ParsedArgument in ParsedArguments)
                     {
-                        case "receiver":
-                            IsReceiver = true;
-                            break;
-                        case "land":
-                            autoLanderState = ScriptState.STARTED;
-                            sas.TryRun("retro");
-                            break;
+                        switch (ParsedArgument.ToLower())
+                        {
+                            case "land":
+                                autoLanderState = ScriptState.STARTED;
+                                sas.TryRun("retro");
+                                break;
+                            default:
+                                break;
+                        }
                     }
                 }
             }
@@ -423,87 +458,79 @@ namespace IngameScript
 
         private void AutoLander()
         {
-            if (
-                autoLanderState == ScriptState.STARTED ||
-                autoLanderState == ScriptState.MAX_THRUST ||
-                autoLanderState == ScriptState.SOFT_THRUST ||
-                autoLanderState == ScriptState.FREE_FALL
-                )
+            ScriptState[] allowedStates = { ScriptState.STARTED, ScriptState.MAX_THRUST, ScriptState.SOFT_THRUST, ScriptState.FREE_FALL };
+            if (allowedStates.Contains(autoLanderState))
             {
-
-                // Get gravity, mass, altitude, velocity, and maximum thrust
-                gravity = mainController.GetNaturalGravity().Length();
-                mass = mainController.CalculateShipMass().PhysicalMass;
                 mainController.TryGetPlanetElevation(MyPlanetElevation.Surface, out altitude);
-                velocity = mainController.GetShipVelocities().LinearVelocity.Length();
+
+                Vector3D gravity = mainController.GetNaturalGravity();
+                double gMs = Math.Sqrt(Math.Pow(gravity.X, 2) + Math.Pow(gravity.Y, 2) + Math.Pow(gravity.Z, 2));
+
+                double totalMass = mainController.CalculateShipMass().TotalMass;
+                double baseMass = mainController.CalculateShipMass().BaseMass;
+                double cargoMass = totalMass - baseMass;
+                double actualMass = baseMass + (cargoMass / INVENTORY_MULTIPLIER);
+                double shipWeight = actualMass * gMs;
+                double G = gMs / 9.81;
+                double margin = CalculateMargin(G);
+
+                velocity = mainController.GetShipSpeed();
                 maxThrust = thrustersUp.Sum(thruster => thruster.MaxEffectiveThrust);
-
-                // Calculate the force of gravity
-                double gravitationalForce = mass * gravity;
-
-                // Calculate the maximum possible deceleration (thrust - gravitational force)
-                double maxDeceleration = (maxThrust - gravitationalForce) / mass;
-
-                // Calculate the distance needed to stop from the current velocity and deceleration
-                double stoppingDistance = Math.Pow(velocity, 2) / (2 * maxDeceleration);
-
-                // Add a safety margin to the stopping distance to account for delays in thrust application
-                double adjustedStoppingDistance = stoppingDistance * CalculateSafetyMargin(mass);
+                brakeDistance = calculateBrakeDistance(gMs, actualMass, maxThrust, velocity);
+                brakeDistance = brakeDistance + margin;
 
                 Echo("Altitude: " + Math.Round(altitude, 2).ToString());
                 Echo("velocity: " + Math.Round(velocity, 2).ToString());
-                Echo("Burn Altitude: " + Math.Round(adjustedStoppingDistance, 2).ToString());
+                Echo("Burn Altitude: " + Math.Round(brakeDistance, 2).ToString());
                 Echo("Max Available Thrust: " + Math.Round(maxThrust, 2).ToString());
-                Echo("Planet Gravity m/s^2: " + Math.Round(gravity, 2).ToString());
+                Echo("Planet Gravity m/s^2: " + Math.Round(gMs, 2).ToString());
+                Echo("Burn time: " + Math.Round(burnTime, 4));
+                Echo("Margin: " + Math.Round(margin, 2).ToString());
 
-                // Start deceleration burn at the adjusted stopping distance
-                if (altitude <= adjustedStoppingDistance && altitude > 50)
+                if (altitude <= brakeDistance)
                 {
                     autoLanderState = ScriptState.MAX_THRUST;
-                    // Set the thrust to the maximum available to initiate deceleration
                     SetThrust(maxThrust);
                 }
 
-                // Once the rocket is close to the surface and the velocity is low, increase the thrust for a soft landing
-                if (altitude >= 5 && altitude <= 50)
-                {
-                    autoLanderState = ScriptState.SOFT_THRUST;
-                    // Calculate the thrust needed to slow down descent gently
-                    // Increase the multiplier as needed to provide more thrust
-                    double descentControlFactor = 0.3; // Increase this factor to apply more thrust during soft landing
-                    double landingThrust = gravitationalForce + (mass * velocity * descentControlFactor);
-
-                    // Ensure the landing thrust does not exceed maximum thrust capacity
-                    landingThrust = Math.Min(landingThrust, maxThrust);
-                    SetThrust(landingThrust);
-                }
-
                 // If the velocity is close to zero and the rocket is very close to the surface, cut the thrust to land
-                if (velocity < 2 && thrustersOn)
+                if ((velocity < 1 || altitude < 5) && thrustersOn)
                 {
                     autoLanderState = ScriptState.LANDED;
                     sas.TryRun("off");
                     SetThrust(0);
                 }
             }
+
         }
 
         private void SetThrust(double thrust)
         {
             Echo("Softlanding Thrust: " + thrust.ToString());
-            thrustersUp.ForEach(thruster => thruster.ThrustOverridePercentage = (float)thrust);
+            thrustersUp.ForEach(thruster => thruster.ThrustOverride = (float)thrust);
             thrustersOn = true;
         }
 
-        private double CalculateSafetyMargin(double shipMass)
+        private double calculateBrakeDistance(double gMs, double actualMass, double maxthrust, double speed)
         {
-            // Calculate the safety margin based on the ship's mass
-            double safetyMargin = -0.00001859 * shipMass + 1.3816;
+            double shipWeight = actualMass * gMs;
 
-            Echo("SafetyMargin: " + Math.Round(Math.Min(1.0, Math.Max(0.1, safetyMargin)), 2).ToString());
+            double brakeForce = maxthrust - shipWeight;
+            double deceleration = brakeForce / actualMass;
 
-            // Ensure safety margin is between 0.1 and 1.0
-            return Math.Min(1.0, Math.Max(0.1, safetyMargin));
+            burnTime = velocity / deceleration;
+
+            return (speed * speed) / (2 * deceleration);
+        }
+
+        static double CalculateMargin(double G)
+        {
+            double slope = -2.67;
+            double intercept = 3.67;
+
+            // Calculating the margin
+            double margin = slope * G + intercept;
+            return margin;
         }
 
         private void AsignThrusters()
