@@ -13,7 +13,11 @@ namespace IngameScript
 {
     partial class Program : MyGridProgram
     {
-        private const int INVENTORY_MULTIPLIER = 10;
+        private const double DEPLOY_LANDING_GEARS_ALTITUDE = 0.8;
+        private const double DEPLOY_LANDING_GEARS_THRESHOLD = 30.0;
+        private const float INVENTORY_MULTIPLIER = 10.0f;
+        private const float EXTEND_PISTON_SPEED = 0.3f;
+        private const float EXTEND_HINGE_SPEED = 3.0f;
 
         enum ScriptState
         {
@@ -76,6 +80,13 @@ namespace IngameScript
 
         int counter = 0;
 
+        // Landing gear 
+        List<IMyMotorStator> hinges = new List<IMyMotorStator>();
+        List<IMyPistonBase> pistons = new List<IMyPistonBase>();
+        bool isLandingGearExtended = false;
+        bool isExtendingLandingGear = false;
+        bool isRetractingLandingGear = false;
+
         public Program()
         {
             //allow transmitter class to access grid
@@ -124,6 +135,15 @@ namespace IngameScript
 
             // Asign thrusters to correct orientation
             AsignThrusters();
+
+            // Get all hinges by custom group name 
+            GridTerminalSystem.GetBlockGroupWithName("LandingGearHinges").GetBlocksOfType(hinges);
+            GridTerminalSystem.GetBlockGroupWithName("LandingGearPistons").GetBlocksOfType(pistons);
+
+            if (hinges.Count() > 0 && pistons.Count() > 0)
+            {
+                CheckLandingGearStatus();
+            }
         }
 
         private void CheckCustomData()
@@ -177,6 +197,16 @@ namespace IngameScript
 
             // Auto lander
             AutoLander();
+
+            if (isExtendingLandingGear)
+            {
+                ExtendLandingGears();
+            }
+
+            if (isRetractingLandingGear)
+            {
+                RetractLandingGears();
+            }   
         }
 
         private void ParseArguments(string argument)
@@ -196,6 +226,14 @@ namespace IngameScript
                             case "land":
                                 autoLanderState = ScriptState.STARTED;
                                 sas.TryRun("retro");
+                                break;
+                            case "toggle-landing-gears":
+                                ActivateLandingGears();
+                                break;
+                            case "retract-landing-gears":
+                                isRetractingLandingGear = true;
+                                isExtendingLandingGear = false;
+                                RetractLandingGears();
                                 break;
                             default:
                                 break;
@@ -493,6 +531,14 @@ namespace IngameScript
                     SetThrust(maxThrust);
                 }
 
+                if (
+                    (altitude <= (brakeDistance * DEPLOY_LANDING_GEARS_ALTITUDE)
+                    || altitude <= DEPLOY_LANDING_GEARS_THRESHOLD) && thrustersOn
+                ) {
+                    isExtendingLandingGear = true;
+                    ExtendLandingGears();
+                }
+
                 // If the velocity is close to zero and the rocket is very close to the surface, cut the thrust to land
                 if ((velocity < 1 || altitude < 5) && thrustersOn)
                 {
@@ -567,5 +613,112 @@ namespace IngameScript
             });
         }
 
+        private void CheckLandingGearStatus()
+        {
+            // Check if landing gear is extended
+            isLandingGearExtended = hinges[0].Angle < 1;
+        }
+
+        private void ActivateLandingGears()
+        {
+            // Validation for the required blocks
+            if (pistons == null || hinges == null)
+            {
+                return;
+            }
+
+            if (pistons.Count() == 0 || hinges.Count() == 0)
+            {
+                return;
+            }
+
+            if (isLandingGearExtended)
+            {
+                // Extend landing gear
+                isRetractingLandingGear = true;
+                RetractLandingGears();
+            } else
+            {
+                // Retract landing gear
+                isExtendingLandingGear = true;
+                ExtendLandingGears();
+            }
+        }
+
+        private void ExtendLandingGears()
+        {
+            // Set safety restrictions
+            hinges.ForEach(hinge =>
+            {
+                hinge.RotorLock = false;
+                hinge.TargetVelocityRPM = EXTEND_HINGE_SPEED;
+            });
+
+            if (Math.Round(hinges[0].Angle, 2) >= DegreesToRadians(300.0f))
+            {
+                // Extending pistons
+                if (pistons[0].Velocity != EXTEND_PISTON_SPEED)
+                {
+                    pistons.ForEach(piston =>
+                    {
+                        piston.Enabled = true;
+                        piston.Velocity = EXTEND_PISTON_SPEED;
+                    });
+                }
+            } else if (Math.Round(hinges[0].Angle, 2) == DegreesToRadians(50.0f))
+            {
+                // Done extending
+                LockLandingGears();
+                isExtendingLandingGear = false;
+                isLandingGearExtended = true;
+            }
+        }
+
+        private void RetractLandingGears()
+        {
+            // Retract hinges
+            hinges.ForEach(hinge =>
+            {
+                hinge.RotorLock = false;
+                hinge.TargetVelocityRPM = -EXTEND_HINGE_SPEED;
+            });
+
+            // Retract pistons
+            if (pistons[0].Velocity != -EXTEND_PISTON_SPEED)
+            {
+                pistons.ForEach(piston =>
+                {
+                    piston.Enabled = true;
+                    piston.Velocity = -EXTEND_PISTON_SPEED;
+                });
+            }
+
+            // Done retracting
+            if (Math.Round(hinges[0].Angle, 2) == DegreesToRadians(269.0f))
+            {
+                LockLandingGears();
+                isRetractingLandingGear = false;
+                isLandingGearExtended = false;
+            }
+        }
+
+        private void LockLandingGears()
+        {
+            hinges.ForEach(hinge =>
+            {
+                hinge.TargetVelocityRPM = 0.0f;
+                hinge.RotorLock = true;
+            });
+            pistons.ForEach(piston =>
+            {
+                piston.Velocity = 0.0f;
+                piston.Enabled = false;
+            });
+        }
+
+        private double DegreesToRadians(float degrees)
+        {
+            return Math.Round(degrees * (float)(Math.PI / 180.0f), 2);
+        }
     }
 }
