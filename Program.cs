@@ -466,8 +466,6 @@ namespace IngameScript
                 Vector3D gravity = mainController.GetNaturalGravity();
                 double gMs = Math.Sqrt(Math.Pow(gravity.X, 2) + Math.Pow(gravity.Y, 2) + Math.Pow(gravity.Z, 2));
 
-
-
                 double totalMass = mainController.CalculateShipMass().TotalMass;
                 double baseMass = mainController.CalculateShipMass().BaseMass;
                 double cargoMass = totalMass - baseMass;
@@ -506,6 +504,13 @@ namespace IngameScript
 
         }
 
+        private void SetThrust(double thrust)
+        {
+            Echo("Softlanding Thrust: " + thrust.ToString());
+            thrustersUp.ForEach(thruster => thruster.ThrustOverride = (float)thrust);
+            thrustersOn = true;
+        }
+
         private double calculateBrakeDistance(double gMs, double actualMass, double maxthrust, double speed)
         {
             double shipWeight = actualMass * gMs;
@@ -516,13 +521,6 @@ namespace IngameScript
             burnTime = velocity / deceleration;
 
             return (speed * speed) / (2 * deceleration);
-        }
-
-        private double CalculateBurnStartTime(double gravity, double mass, double velocity, double maxThrust)
-        {
-            Echo("Softlanding Thrust: " + thrust.ToString());
-            thrustersUp.ForEach(thruster => thruster.ThrustOverride = (float)thrust);
-            thrustersOn = true;
         }
 
         static double CalculateMargin(double G)
