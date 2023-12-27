@@ -30,10 +30,18 @@ namespace IngameScript
             // Broadcast listener
             IMyBroadcastListener _broadcastListener;
 
+            // Altitude tracking
+            DateTime[] sampleTimes;
+            float[] altitudeValues;
+            int historyValueCount = 500;
+
             public Receiver(Program program)
             {
                 // Set program reference
                 _program = program;
+
+                // Set up receiver
+                _program.IsReceiver = true;
 
                 // Initialize receiver
                 Initialize();
@@ -43,6 +51,10 @@ namespace IngameScript
             {
                 // Register message handler
                 RegisterListener();
+
+                // Initialize arrays for altitude tracking
+                sampleTimes = new DateTime[historyValueCount];
+                altitudeValues = new float[historyValueCount];
             }
 
             private void RegisterListener()
@@ -103,15 +115,77 @@ namespace IngameScript
                 sb.Append("\nTank Capacity:" + data[8]);
                 sb.Append("\nMass:" + data[9]);
 
-                // get custom data (name of LCD panel)
-                string lcdPanelGraphCustomData = _program.Me.CustomData;
+                // get custom data (name of LCD panel) which has been set like graphLCD=LCD Panel Name
+                string lcdPanelGraphCustomData = _program.Me.CustomData.Split('=')[1];
 
                 // Get LCD panel using that custom data name
                 IMyTextPanel lcdPanelGraph = (IMyTextPanel)_program.GridTerminalSystem.GetBlockWithName(lcdPanelGraphCustomData);
 
-                // Print data to LCD panel
-                lcdPanelGraph.WritePublicTitle("BSP-Autolander");
-                lcdPanelGraph.WriteText(sb.ToString());
+                // record altitude but round to nearest meter
+                RecordAltitude(float.Parse(data[2]), lcdPanelGraph);
+            }
+
+            void RecordAltitude(float altitude, IMyTextPanel lcdPanelGraph)
+            {
+                // Record altitude and time
+                AddValueToArray(sampleTimes, DateTime.Now);
+                AddValueToArray(altitudeValues, altitude);
+
+                // Update graph on LCD
+                DrawAltitudeGraph(lcdPanelGraph);
+            }
+
+            void AddValueToArray<T>(T[] array, T value)
+            {
+                Array.Copy(array, 1, array, 0, array.Length - 1);
+                array[array.Length - 1] = value;
+            }
+
+            void DrawAltitudeGraph(IMyTextPanel lcdPanel)
+            {
+                // Ensure the LCD panel is set to write and draw mode
+                lcdPanel.ContentType = ContentType.SCRIPT;
+                lcdPanel.Script = "";
+
+                // Check if the altitudeValues array has data
+                if (altitudeValues == null || altitudeValues.Length == 0)
+                {
+                    lcdPanel.WriteText("No altitude data available.");
+                    return;
+                }
+
+                // Prepare the drawing surface
+                using (var frame = lcdPanel.DrawFrame())
+                {
+                    var viewport = new RectangleF((lcdPanel.TextureSize - lcdPanel.SurfaceSize) / 2f, lcdPanel.SurfaceSize);
+
+                    // Calculate scale factors for the graph
+                    float xScale = viewport.Width / altitudeValues.Length;
+                    float yMax = altitudeValues.Max();
+                    float yMin = altitudeValues.Min();
+                    float yScale = (yMax - yMin) > 0 ? viewport.Height / (yMax - yMin) : 0; // Adjust scale to include yMin
+
+                    // Draw the graph
+                    for (int i = 1; i < altitudeValues.Length; i++)
+                    {
+                        // Calculate points for the line
+                        var startPoint = new Vector2(viewport.X + (i - 1) * xScale, viewport.Y + viewport.Height - ((altitudeValues[i - 1] - yMin) * yScale));
+                        var endPoint = new Vector2(viewport.X + i * xScale, viewport.Y + viewport.Height - ((altitudeValues[i] - yMin) * yScale));
+
+                        // Draw the line
+                        var line = new MySprite()
+                        {
+                            Type = SpriteType.TEXTURE,
+                            Data = "SquareSimple",
+                            Position = (startPoint + endPoint) / 2,
+                            Size = new Vector2((endPoint - startPoint).Length(), 1),
+                            Color = Color.White,
+                            RotationOrScale = (float)Math.Atan2(endPoint.Y - startPoint.Y, endPoint.X - startPoint.X)
+                        };
+
+                        frame.Add(line);
+                    }
+                }
             }
         }
     }

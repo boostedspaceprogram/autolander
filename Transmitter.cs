@@ -34,6 +34,9 @@ namespace IngameScript
             {
                 // Set program reference
                 _program = program;
+                
+                // Set up transmitter
+                _program.IsTransmitting = true;
             }
 
             // <summary>
