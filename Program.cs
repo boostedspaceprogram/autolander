@@ -5,6 +5,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using VRage.Game.ModAPI.Ingame.Utilities;
+using VRage.Input;
 using VRageMath;
 using VRageRender;
 
@@ -12,6 +13,8 @@ namespace IngameScript
 {
     partial class Program : MyGridProgram
     {
+        private const int INVENTORY_MULTIPLIER = 10;
+
         enum ScriptState
         {
             STARTED,
@@ -67,6 +70,9 @@ namespace IngameScript
         double altitude = 0.0;
         double velocity = 0.0;
         double maxThrust = 0.0;
+        double brakeDistance = 0.0;
+        double burnTime = 0.0;
+        bool thrustersOn = false;
 
         int counter = 0;
 
@@ -452,78 +458,81 @@ namespace IngameScript
 
         private void AutoLander()
         {
-            if (
-                autoLanderState == ScriptState.STARTED ||
-                autoLanderState == ScriptState.MAX_THRUST ||
-                autoLanderState == ScriptState.FREE_FALL
-                )
+            ScriptState[] allowedStates = { ScriptState.STARTED, ScriptState.MAX_THRUST, ScriptState.SOFT_THRUST, ScriptState.FREE_FALL };
+            if (allowedStates.Contains(autoLanderState))
             {
-                if (autoLanderState == ScriptState.STARTED)
-                {
-                    // Start free fall
-                    autoLanderState = ScriptState.FREE_FALL;
-                }
-
-                // Get gravity, mass, altitude, velocity, and maximum thrust
-                gravity = mainController.GetNaturalGravity().Length();
-                mass = mainController.CalculateShipMass().TotalMass;
                 mainController.TryGetPlanetElevation(MyPlanetElevation.Surface, out altitude);
-                velocity = mainController.GetShipVelocities().LinearVelocity.Length();
+
+                Vector3D gravity = mainController.GetNaturalGravity();
+                double gMs = Math.Sqrt(Math.Pow(gravity.X, 2) + Math.Pow(gravity.Y, 2) + Math.Pow(gravity.Z, 2));
+
+
+
+                double totalMass = mainController.CalculateShipMass().TotalMass;
+                double baseMass = mainController.CalculateShipMass().BaseMass;
+                double cargoMass = totalMass - baseMass;
+                double actualMass = baseMass + (cargoMass / INVENTORY_MULTIPLIER);
+                double shipWeight = actualMass * gMs;
+                double G = gMs / 9.81;
+                double margin = CalculateMargin(G);
+
+                velocity = mainController.GetShipSpeed();
                 maxThrust = thrustersUp.Sum(thruster => thruster.MaxEffectiveThrust);
+                brakeDistance = calculateBrakeDistance(gMs, actualMass, maxThrust, velocity);
+                brakeDistance = brakeDistance + margin;
 
-                Echo("Velocity: " + velocity.ToString());
-                Echo("Altitude: " + altitude.ToString());
+                Echo("Altitude: " + Math.Round(altitude, 2).ToString());
+                Echo("velocity: " + Math.Round(velocity, 2).ToString());
+                Echo("Burn Altitude: " + Math.Round(brakeDistance, 2).ToString());
+                Echo("Max Available Thrust: " + Math.Round(maxThrust, 2).ToString());
+                Echo("Planet Gravity m/s^2: " + Math.Round(gMs, 2).ToString());
+                Echo("Burn time: " + Math.Round(burnTime, 4));
+                Echo("Margin: " + Math.Round(margin, 2).ToString());
 
-                if (autoLanderState == ScriptState.FREE_FALL)
+                if (altitude <= brakeDistance)
                 {
-                    double burnStartAltitude = CalculateBurnStartTime(gravity, mass, velocity, maxThrust);
-                    Echo("Burn Start Altitude: " + burnStartAltitude.ToString());
-                    if (altitude <= burnStartAltitude)
-                    {
-                        autoLanderState = ScriptState.MAX_THRUST;
-                        SetThrusterOutput(maxThrust); // Activate the thruster at max capacity
-                    }
+                    autoLanderState = ScriptState.MAX_THRUST;
+                    SetThrust(maxThrust);
                 }
 
-                if (autoLanderState == ScriptState.MAX_THRUST)
+                // If the velocity is close to zero and the rocket is very close to the surface, cut the thrust to land
+                if ((velocity < 1 || altitude < 5) && thrustersOn)
                 {
-                    // Check if landing conditions are met
-                    if (IsLandingConditionMet(altitude, velocity))
-                    {
-                        autoLanderState = ScriptState.LANDED;
-                        sas.TryRun("off");
-                        SetThrusterOutput(0.0);
-                    }
+                    autoLanderState = ScriptState.LANDED;
+                    sas.TryRun("off");
+                    SetThrust(0);
                 }
             }
+
+        }
+
+        private double calculateBrakeDistance(double gMs, double actualMass, double maxthrust, double speed)
+        {
+            double shipWeight = actualMass * gMs;
+
+            double brakeForce = maxthrust - shipWeight;
+            double deceleration = brakeForce / actualMass;
+
+            burnTime = velocity / deceleration;
+
+            return (speed * speed) / (2 * deceleration);
         }
 
         private double CalculateBurnStartTime(double gravity, double mass, double velocity, double maxThrust)
         {
-            double deceleration = (maxThrust / mass) - gravity; // Net deceleration
-            double timeToStop = velocity / deceleration; // Time to reduce velocity to zero
-            double stoppingDistance = 0.5 * deceleration * Math.Pow(timeToStop, 2); // Distance covered during deceleration
-
-            // You might add a small safety buffer to this distance
-            double safetyBuffer = 10; // Example buffer, can be adjusted
-            double burnStartAltitude = stoppingDistance + safetyBuffer;
-
-            return burnStartAltitude;
-        }
-
-        private bool IsLandingConditionMet(double altitude, double velocity)
-        {
-            // Define acceptable parameters for landing
-            const double acceptableAltitude = 5; // meters
-            const double acceptableVelocity = 1; // meters per second
-
-            // Check if the rocket is within the acceptable parameters for landing
-            return altitude <= acceptableAltitude && velocity <= acceptableVelocity;
-        }
-
-        private void SetThrusterOutput(double thrust)
-        {
+            Echo("Softlanding Thrust: " + thrust.ToString());
             thrustersUp.ForEach(thruster => thruster.ThrustOverride = (float)thrust);
+            thrustersOn = true;
+        }
+
+        static double CalculateMargin(double G)
+        {
+            double slope = -2.67;
+            double intercept = 3.67;
+
+            // Calculating the margin
+            double margin = slope * G + intercept;
+            return margin;
         }
 
         private void AsignThrusters()
